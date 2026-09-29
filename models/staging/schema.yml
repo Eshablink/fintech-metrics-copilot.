@@ -1,0 +1,71 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: borrowers
+      - name: loans
+      - name: exposures
+      - name: payments
+      - name: reminders
+      - name: contact_events
+      - name: ptp_events
+      - name: complaints
+
+models:
+  - name: stg_borrowers
+    columns:
+      - name: borrower_id
+        tests: [not_null, unique]
+  - name: stg_loans
+    columns:
+      - name: loan_id
+        tests: [not_null, unique]
+      - name: borrower_id
+        tests:
+          - relationships:
+              to: ref('stg_borrowers')
+              field: borrower_id
+  - name: stg_exposures
+    columns:
+      - name: exposure_id
+        tests: [not_null, unique]
+      - name: loan_id
+        tests:
+          - relationships:
+              to: ref('stg_loans')
+              field: loan_id
+      - name: dpd_bucket
+        tests:
+          - accepted_values:
+              values: ['current', '1-29', '30-60', '61-90', '91+']
+  - name: stg_payments
+    columns:
+      - name: payment_id
+        tests: [not_null, unique]
+      - name: exposure_id
+        tests:
+          - relationships:
+              to: ref('stg_exposures')
+              field: exposure_id
+  - name: stg_reminders
+    columns:
+      - name: reminder_id
+        tests: [not_null, unique]
+      - name: channel
+        tests:
+          - accepted_values:
+              values: ['call', 'sms', 'whatsapp']
+  - name: stg_contact_events
+    columns:
+      - name: contact_id
+        tests: [not_null, unique]
+  - name: stg_ptp_events
+    columns:
+      - name: ptp_id
+        tests: [not_null, unique]
+  - name: stg_complaints
+    columns:
+      - name: complaint_id
+        tests: [not_null, unique]
