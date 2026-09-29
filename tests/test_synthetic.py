@@ -5,9 +5,11 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 import pytest
 
+from copilot.storage import load_into_duckdb
 from copilot.synthetic import generate, load_config, write_dataset
 
 
@@ -99,3 +101,46 @@ def test_invalid_configuration(config, tmp_path):
     source.write_text("simulated: false\n", encoding="utf-8")
     with pytest.raises(ValueError, match="simulated"):
         load_config(source)
+
+
+def test_duckdb_load_is_idempotent(config, tmp_path):
+    output_dir = tmp_path / "generated"
+    config = replace(config, output_dir=str(output_dir))
+    write_dataset(config, Path("config/simulation.yaml"))
+    db_path = tmp_path / "warehouse.duckdb"
+
+    first = load_into_duckdb(db_path=db_path, source_dir=output_dir)
+    second = load_into_duckdb(db_path=db_path, source_dir=output_dir)
+    assert first == second
+
+    with duckdb.connect(str(db_path), read_only=True) as conn:
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM raw.{table}").fetchone()[0]
+            for table in ("borrowers", "loans", "exposures", "payments", "reminders")
+        }
+        assert counts == first
+        fk_mismatch = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM raw.exposures e
+            LEFT JOIN raw.loans l ON e.loan_id = l.loan_id
+            WHERE l.loan_id IS NULL
+            """
+        ).fetchone()[0]
+        assert fk_mismatch == 0
+        money_check = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM raw.exposures e
+            JOIN raw.payments p ON e.exposure_id = p.exposure_id
+            WHERE e.opening_minor - p.amount_minor <> e.closing_minor
+            """
+        ).fetchone()[0]
+        assert money_check == 0
+        with pytest.raises(duckdb.BinderException):
+            conn.execute("DROP TABLE raw.loans")
+
+
+def test_duckdb_loader_rejects_missing_sources(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_into_duckdb(db_path=tmp_path / "warehouse.duckdb", source_dir=tmp_path / "missing")
