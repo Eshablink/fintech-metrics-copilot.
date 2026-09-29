@@ -29,8 +29,14 @@ def test_fixed_seed_is_reproducible(config):
 def test_grains_and_foreign_keys(config):
     tables = generate(config)
     for name, key in {
-        "borrowers": "borrower_id", "loans": "loan_id", "exposures": "exposure_id",
-        "payments": "payment_id", "reminders": "reminder_id",
+        "borrowers": "borrower_id",
+        "loans": "loan_id",
+        "exposures": "exposure_id",
+        "payments": "payment_id",
+        "reminders": "reminder_id",
+        "contact_events": "contact_id",
+        "ptp_events": "ptp_id",
+        "complaints": "complaint_id",
     }.items():
         assert tables[name][key].is_unique
         assert not tables[name].isna().any().any()
@@ -39,9 +45,8 @@ def test_grains_and_foreign_keys(config):
     assert len(tables["loans"]) == config.loan_count
     assert len(tables["exposures"]) == config.loan_count * config.weeks
     assert set(tables["loans"].borrower_id) <= set(tables["borrowers"].borrower_id)
-    for name in ("exposures", "payments", "reminders"):
+    for name in ("exposures", "payments", "reminders", "contact_events", "ptp_events", "complaints"):
         assert set(tables[name].loan_id) <= set(tables["loans"].loan_id)
-    for name in ("payments", "reminders"):
         assert set(tables[name].exposure_id) <= set(tables["exposures"].exposure_id)
 
 
@@ -75,6 +80,27 @@ def test_bucket_boundaries(config):
 def test_randomization_is_per_borrower(config):
     reminders = generate(config)["reminders"]
     assert reminders.groupby("loan_id").arm.nunique().eq(1).all()
+
+
+def test_contact_ptp_and_complaints_consistency(config):
+    tables = generate(config)
+    contacts = tables["contact_events"]
+    ptp = tables["ptp_events"]
+    complaints = tables["complaints"]
+
+    assert contacts["contacted"].isin([True, False]).all()
+    assert ptp["promise_made"].isin([True, False]).all()
+    assert ptp["promise_kept"].isin([True, False]).all()
+    assert complaints["complaint_filed"].isin([True, False]).all()
+
+    merged = contacts.merge(ptp, on=["loan_id", "exposure_id"], validate="one_to_one")
+    assert merged.loc[~merged["contacted"], "promise_made"].eq(False).all()
+    assert merged.loc[~merged["promise_made"], "promise_kept"].eq(False).all()
+
+    complaint_dates = complaints.loc[complaints["complaint_filed"], "complaint_date"]
+    assert complaint_dates.notna().all()
+    no_complaint_dates = complaints.loc[~complaints["complaint_filed"], "complaint_date"]
+    assert no_complaint_dates.isna().all()
 
 
 def test_written_hashes_and_manifest_are_reproducible(config, tmp_path):
@@ -116,7 +142,16 @@ def test_duckdb_load_is_idempotent(config, tmp_path):
     with duckdb.connect(str(db_path), read_only=True) as conn:
         counts = {
             table: conn.execute(f"SELECT COUNT(*) FROM raw.{table}").fetchone()[0]
-            for table in ("borrowers", "loans", "exposures", "payments", "reminders")
+            for table in (
+                "borrowers",
+                "loans",
+                "exposures",
+                "payments",
+                "reminders",
+                "contact_events",
+                "ptp_events",
+                "complaints",
+            )
         }
         assert counts == first
         fk_mismatch = conn.execute(
