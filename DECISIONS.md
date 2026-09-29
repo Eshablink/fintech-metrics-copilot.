@@ -22,3 +22,6 @@ Introduce only minimal validation CI early if required to execute tests; retain 
 Require owner deployment authorization and ask before paid infrastructure — no live demo URL exists until deployment and public smoke testing succeed.
 Honor exact-path/branch/commit confirmation requirements of the GitHub connector — autonomous work does not override tool write safeguards.
 Leave tasks unchecked until acceptance tests run successfully — committed source is not proof that code works.
+Use `CREATE OR REPLACE` table loads inside an explicit DuckDB transaction for raw sources — idempotent reruns and rollback safety satisfy task-2 reproducibility checks.
+Use DuckDB read-only connection tests as warehouse write guards — task-2 requires proof that reporting sessions cannot mutate loaded tables.
+Create BLOCKERS.md and PROGRESS.md early — continuous autonomous execution needs persistent blocker and status tracking.
