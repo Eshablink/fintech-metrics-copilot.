@@ -88,10 +88,17 @@ def load_config(path: Path) -> SimulationConfig:
 
 
 def generate(config: SimulationConfig) -> dict[str, pd.DataFrame]:
-    """Generate one loan per borrower and weekly exposure/payment/reminder grains."""
+    """Generate one loan per borrower and weekly event grains."""
     rng = random.Random(config.seed)
     records: dict[str, list[dict[str, Any]]] = {
-        "borrowers": [], "loans": [], "exposures": [], "payments": [], "reminders": []
+        "borrowers": [],
+        "loans": [],
+        "exposures": [],
+        "payments": [],
+        "reminders": [],
+        "contact_events": [],
+        "ptp_events": [],
+        "complaints": [],
     }
     this_monday = config.as_of_date - timedelta(days=config.as_of_date.weekday())
     start = this_monday - timedelta(weeks=config.weeks)
@@ -100,12 +107,13 @@ def generate(config: SimulationConfig) -> dict[str, pd.DataFrame]:
         principal = rng.randint(config.principal_min_minor, config.principal_max_minor)
         due_date = start - timedelta(days=rng.randint(0, 120))
         arm = rng.choice(("morning", "evening"))
-        records["borrowers"].append({
-            "borrower_id": borrower_id, "segment": rng.choice(config.segments), "arm": arm
-        })
+        segment = rng.choice(config.segments)
+        records["borrowers"].append({"borrower_id": borrower_id, "segment": segment, "arm": arm})
         records["loans"].append({
-            "loan_id": loan_id, "borrower_id": borrower_id,
-            "principal_minor": principal, "due_date": due_date.isoformat(),
+            "loan_id": loan_id,
+            "borrower_id": borrower_id,
+            "principal_minor": principal,
+            "due_date": due_date.isoformat(),
             "origination_date": (due_date - timedelta(days=90)).isoformat(),
         })
         outstanding = principal
@@ -114,30 +122,69 @@ def generate(config: SimulationConfig) -> dict[str, pd.DataFrame]:
             exposure_id = f"{loan_id}-W{week:03d}"
             dpd = max(0, (week_start - due_date).days) if outstanding else 0
             recovered = rng.randint(0, outstanding // 5) if outstanding else 0
-            # This baseline has no treatment effect; the experiment task adds a prespecified DGP.
+            reminder_channel = rng.choice(config.channels)
+            contacted = rng.random() < (0.45 if reminder_channel == "call" else 0.35)
+            complaint_probability = 0.03 if reminder_channel == "call" else 0.015
+            complaint_filed = rng.random() < complaint_probability
+            promise_made = contacted and (rng.random() < 0.4)
+            promise_kept = promise_made and (recovered > 0) and (rng.random() < 0.7)
+
             records["exposures"].append({
-                "exposure_id": exposure_id, "loan_id": loan_id,
-                "week_start": week_start.isoformat(), "opening_minor": outstanding,
-                "closing_minor": outstanding - recovered, "dpd": dpd,
+                "exposure_id": exposure_id,
+                "loan_id": loan_id,
+                "week_start": week_start.isoformat(),
+                "opening_minor": outstanding,
+                "closing_minor": outstanding - recovered,
+                "dpd": dpd,
                 "dpd_bucket": config.bucket(dpd),
             })
             records["payments"].append({
-                "payment_id": f"P-{exposure_id}", "exposure_id": exposure_id,
-                "loan_id": loan_id, "amount_minor": recovered,
+                "payment_id": f"P-{exposure_id}",
+                "exposure_id": exposure_id,
+                "loan_id": loan_id,
+                "amount_minor": recovered,
                 "payment_date": (week_start + timedelta(days=6)).isoformat(),
                 "status": "settled" if recovered else "no_payment",
             })
             records["reminders"].append({
-                "reminder_id": f"R-{exposure_id}", "exposure_id": exposure_id,
-                "loan_id": loan_id, "channel": rng.choice(config.channels),
+                "reminder_id": f"R-{exposure_id}",
+                "exposure_id": exposure_id,
+                "loan_id": loan_id,
+                "channel": reminder_channel,
                 "reminder_date": (week_start + timedelta(days=1)).isoformat(),
                 "arm": arm,
             })
+            records["contact_events"].append({
+                "contact_id": f"C-{exposure_id}",
+                "exposure_id": exposure_id,
+                "loan_id": loan_id,
+                "channel": reminder_channel,
+                "contacted": contacted,
+                "contact_date": (week_start + timedelta(days=2)).isoformat(),
+            })
+            records["ptp_events"].append({
+                "ptp_id": f"T-{exposure_id}",
+                "exposure_id": exposure_id,
+                "loan_id": loan_id,
+                "promise_made": promise_made,
+                "promise_kept": promise_kept,
+                "promise_date": (week_start + timedelta(days=3)).isoformat(),
+            })
+            records["complaints"].append({
+                "complaint_id": f"K-{exposure_id}",
+                "exposure_id": exposure_id,
+                "loan_id": loan_id,
+                "channel": reminder_channel,
+                "complaint_filed": complaint_filed,
+                "complaint_date": (week_start + timedelta(days=4)).isoformat() if complaint_filed else "",
+            })
             outstanding -= recovered
     frames = {name: pd.DataFrame(rows) for name, rows in records.items()}
-    for frame in frames.values():
+    for name, frame in frames.items():
         frame["simulated"] = True
         frame["company"] = config.company
+        if name == "complaints":
+            frame["complaint_date"] = frame["complaint_date"].replace("", pd.NA)
     return frames
 
 
@@ -151,9 +198,13 @@ def write_dataset(config: SimulationConfig, config_path: Path) -> dict[str, str]
         (output / f"{name}.csv").write_bytes(content)
         hashes[f"{name}.csv"] = hashlib.sha256(content).hexdigest()
     manifest = {
-        "simulated": True, "company": config.company, "seed": config.seed,
-        "as_of_date": config.as_of_date.isoformat(), "timezone": config.timezone,
-        "currency": config.currency, "minor_units_per_major": config.minor_units_per_major,
+        "simulated": True,
+        "company": config.company,
+        "seed": config.seed,
+        "as_of_date": config.as_of_date.isoformat(),
+        "timezone": config.timezone,
+        "currency": config.currency,
+        "minor_units_per_major": config.minor_units_per_major,
         "config_sha256": hashlib.sha256(config_path.read_bytes()).hexdigest(),
         "generator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "files": hashes,
