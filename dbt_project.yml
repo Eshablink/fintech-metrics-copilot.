@@ -1,0 +1,21 @@
+name: fintech_metrics_copilot
+version: 1.0.0
+config-version: 2
+
+profile: fintech_metrics_copilot
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  fintech_metrics_copilot:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
