@@ -1,0 +1,8 @@
+fintech_metrics_copilot:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: data/warehouse/xyz_finance.duckdb
+      threads: 2
+      schema: main
