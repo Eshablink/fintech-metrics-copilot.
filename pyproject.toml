@@ -7,13 +7,14 @@ name = "fintech-metrics-copilot"
 version = "0.1.0"
 description = "Evidence-first analytics for fictional XYZ Finance using simulated data"
 requires-python = ">=3.11,<3.13"
-dependencies = ["pandas>=2.2,<3", "PyYAML>=6.0.2,<7"]
+dependencies = ["pandas>=2.2,<3", "PyYAML>=6.0.2,<7", "duckdb>=1.1,<2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9", "ruff>=0.9,<1", "mypy>=1.14,<2", "types-PyYAML>=6", "pandas-stubs>=2.2,<3"]
 
 [project.scripts]
 fintech-simulate = "copilot.synthetic:main"
+fintech-load-duckdb = "copilot.storage:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
