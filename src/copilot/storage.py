@@ -14,6 +14,9 @@ def load_into_duckdb(*, db_path: Path, source_dir: Path) -> dict[str, int]:
         "exposures": "exposures.csv",
         "payments": "payments.csv",
         "reminders": "reminders.csv",
+        "contact_events": "contact_events.csv",
+        "ptp_events": "ptp_events.csv",
+        "complaints": "complaints.csv",
     }
     missing = [name for name, file_name in required.items() if not (source_dir / file_name).exists()]
     if missing:
